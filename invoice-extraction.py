@@ -26,7 +26,7 @@ def main():
             else:
                 st.dataframe(df, use_container_width=True)
 
-    st.success("Hope I was able to save your time")
+    st.success("Done")
     
 if __name__ == '__main__':
     main()

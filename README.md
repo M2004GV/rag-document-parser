@@ -54,8 +54,10 @@ A solução segue um *pipeline* RAG bem definido para garantir a extração de d
 ```bash
 git clone https://github.com/seu-repo/rag-invoice-processor.git
 cd rag-invoice-processor
-pip install -r requirements.txt```
+pip install -r requirements.txt
+```
 
 ### Executar aplicação
 ```bash
-streamlit run streamlit_app.py```
+streamlit run streamlit_app.py
+ ```

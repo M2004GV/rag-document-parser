@@ -42,3 +42,20 @@ A solução segue um *pipeline* RAG bem definido para garantir a extração de d
 5.  **Extração Final:** O **Large Language Model** utiliza o contexto aumentado para extrair e estruturar os detalhes-chave da fatura, apresentando-os através da **interface do Streamlit**.
 
 ![Diagrama conceitual do RAG com Faturas](assets/image.png)
+
+## 🚀 Instalação e Execução
+
+### Pré-requisitos
+- Python 3.11+
+- pip
+- Chave de API do Google Gemini (`GOOGLE_API_KEY` no arquivo `.env`)
+
+### Instalação
+```bash
+git clone https://github.com/seu-repo/rag-invoice-processor.git
+cd rag-invoice-processor
+pip install -r requirements.txt```
+
+### Executar aplicação
+```bash
+streamlit run streamlit_app.py```

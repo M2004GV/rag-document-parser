@@ -41,4 +41,4 @@ A solução segue um *pipeline* RAG bem definido para garantir a extração de d
     * **Aumento de Prompt:** Essas informações recuperadas (**o contexto**) são usadas para **aumentar o *prompt*** (instrução) enviado ao LLM.
 5.  **Extração Final:** O **Large Language Model** utiliza o contexto aumentado para extrair e estruturar os detalhes-chave da fatura, apresentando-os através da **interface do Streamlit**.
 
-![Diagrama conceitual do RAG com Faturas](image.png)
+![Diagrama conceitual do RAG com Faturas](assets/image.png)

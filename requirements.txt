@@ -6,3 +6,5 @@ faiss-cpu
 pypdf
 python-dotenv
 pandas
+streamlit>=1.35.0
+plotly>=5.22.0

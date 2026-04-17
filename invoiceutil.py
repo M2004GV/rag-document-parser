@@ -9,7 +9,7 @@ from typing import List, Any, Dict
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
 
 INVOICE_PROMPT_TEMPLATE = """
@@ -54,12 +54,6 @@ COLUMNS = [
     "Phone number",
     "Address",
 ]
-
-def _ensure_google_key():
-    if not os.getenv("GOOGLE_API_KEY"):
-        raise EnvironmentError(
-            "GOOGLE_API_KEY não encontrado nas variáveis de ambiente (.env)."
-        )
 
 
 def _invoke_with_retry(chain, input_data, max_retries: int = 3):
@@ -148,22 +142,16 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
 
 def create_docs(
     user_pdf_list: List[Any],
-    model_name: str = "gemini-2.0-flash",
+    model_name: str = "llama3.2",
 ) -> pd.DataFrame:
     """
     Recebe a lista do st.file_uploader (UploadedFile) e retorna um DataFrame
     com os campos extraídos por arquivo.
     """
-    _ensure_google_key()
-
     if not user_pdf_list:
         return pd.DataFrame(columns=COLUMNS)
 
-    llm = ChatGoogleGenerativeAI(
-        model=model_name,
-        temperature=0,
-        convert_system_message_to_human=True,
-    )
+    llm = ChatOllama(model=model_name, temperature=0)
     prompt = PromptTemplate.from_template(INVOICE_PROMPT_TEMPLATE)
     chain = prompt | llm | StrOutputParser()
 

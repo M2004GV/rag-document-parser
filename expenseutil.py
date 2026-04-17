@@ -9,7 +9,7 @@ from typing import List, Any, Dict
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 
@@ -126,13 +126,6 @@ CATEGORIAS = [
 # Helpers internos
 # ---------------------------------------------------------------------------
 
-def _ensure_google_key():
-    if not os.getenv("GOOGLE_API_KEY"):
-        raise EnvironmentError(
-            "GOOGLE_API_KEY não encontrado nas variáveis de ambiente (.env)."
-        )
-
-
 def _invoke_with_retry(chain, input_data, max_retries: int = 3):
     for attempt in range(max_retries):
         try:
@@ -244,22 +237,16 @@ def _spending_summary_text(df: pd.DataFrame) -> str:
 
 def extract_transactions(
     user_pdf_list: List[Any],
-    model_name: str = "gemini-2.0-flash",
+    model_name: str = "llama3.2",
 ) -> pd.DataFrame:
     """
     Extrai todas as transações de faturas de cartão de crédito em PDF.
     Retorna DataFrame com uma linha por transação.
     """
-    _ensure_google_key()
-
     if not user_pdf_list:
         return pd.DataFrame(columns=TRANSACTION_COLUMNS)
 
-    llm = ChatGoogleGenerativeAI(
-        model=model_name,
-        temperature=0,
-        convert_system_message_to_human=True,
-    )
+    llm = ChatOllama(model=model_name, temperature=0)
     prompt = PromptTemplate.from_template(EXPENSE_EXTRACTION_PROMPT)
     chain = prompt | llm | StrOutputParser()
 
@@ -365,18 +352,13 @@ def get_top_merchants(df: pd.DataFrame, n: int = 10) -> pd.DataFrame:
 # Funções públicas de IA
 # ---------------------------------------------------------------------------
 
-def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-2.0-flash") -> str:
+def get_ai_insights(df: pd.DataFrame, model_name: str = "llama3.2") -> str:
     """Gera análise completa e recomendações de gastos usando IA."""
-    _ensure_google_key()
     if df.empty:
         return "Nenhum dado disponível para análise."
 
     spending_data = _spending_summary_text(df)
-    llm = ChatGoogleGenerativeAI(
-        model=model_name,
-        temperature=0.3,
-        convert_system_message_to_human=True,
-    )
+    llm = ChatOllama(model=model_name, temperature=0.3)
     response = llm.invoke(
         [HumanMessage(content=ANALYSIS_PROMPT.format(spending_data=spending_data))]
     )
@@ -384,19 +366,14 @@ def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-2.0-flash") -> s
 
 
 def chat_about_spending(
-    df: pd.DataFrame, question: str, model_name: str = "gemini-2.0-flash"
+    df: pd.DataFrame, question: str, model_name: str = "llama3.2"
 ) -> str:
     """Responde perguntas sobre os gastos usando IA."""
-    _ensure_google_key()
     if df.empty:
         return "Nenhum dado disponível. Por favor, carregue suas faturas primeiro."
 
     spending_data = _spending_summary_text(df)
-    llm = ChatGoogleGenerativeAI(
-        model=model_name,
-        temperature=0.3,
-        convert_system_message_to_human=True,
-    )
+    llm = ChatOllama(model=model_name, temperature=0.3)
     prompt_text = CHAT_PROMPT.format(spending_data=spending_data, question=question)
     response = llm.invoke([HumanMessage(content=prompt_text)])
     return response.content

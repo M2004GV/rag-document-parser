@@ -9,7 +9,7 @@ from typing import List, Any, Dict
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 
@@ -126,11 +126,28 @@ CATEGORIAS = [
 # Helpers internos
 # ---------------------------------------------------------------------------
 
-def _ensure_google_key():
-    if not os.getenv("GOOGLE_API_KEY"):
-        raise EnvironmentError(
-            "GOOGLE_API_KEY não encontrado nas variáveis de ambiente (.env)."
-        )
+def _invoke_with_retry(chain, input_data, max_retries: int = 3):
+    for attempt in range(max_retries):
+        try:
+            return chain.invoke(input_data)
+        except Exception as e:
+            msg = str(e)
+            if "RESOURCE_EXHAUSTED" not in msg and "429" not in msg:
+                raise
+            if "PerDay" in msg:
+                raise RuntimeError(
+                    "Cota diária da API Google esgotada. Aguarde até amanhã ou "
+                    "ative o faturamento em: https://ai.google.dev/gemini-api/docs/rate-limits"
+                ) from e
+            match = re.search(r"retry in (\d+)", msg)
+            wait = int(match.group(1)) + 5 if match else 65
+            if attempt < max_retries - 1:
+                time.sleep(wait)
+            else:
+                raise RuntimeError(
+                    f"Limite por minuto atingido após {max_retries} tentativas. "
+                    "Aguarde alguns minutos e tente novamente."
+                ) from e
 
 
 def _save_uploaded_to_temp(uploaded_file) -> str:
@@ -140,6 +157,27 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
     with open(path, "wb") as f:
         f.write(uploaded_file.getbuffer())
     return path
+
+
+def _filter_statement_text(text: str, max_chars: int = 10_000) -> str:
+    """Mantém apenas linhas com datas ou valores monetários (as transações).
+    Remove cabeçalhos, rodapés e textos jurídicos — reduz ~70% dos tokens."""
+    lines = text.split("\n")
+    result = []
+    prev_kept = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            prev_kept = False
+            continue
+        has_date = bool(re.search(r"\b\d{2}/\d{2}\b", stripped))
+        has_amount = bool(re.search(r"\b\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\b", stripped))
+        keep = has_date or has_amount or prev_kept
+        if keep:
+            result.append(stripped)
+        prev_kept = has_date or has_amount
+    filtered = "\n".join(result) if result else text
+    return filtered[:max_chars]
 
 
 def _robust_json_parse(text: str) -> Dict[str, Any]:
@@ -199,22 +237,16 @@ def _spending_summary_text(df: pd.DataFrame) -> str:
 
 def extract_transactions(
     user_pdf_list: List[Any],
-    model_name: str = "gemini-2.0-flash-lite",
+    model_name: str = "llama3.2",
 ) -> pd.DataFrame:
     """
     Extrai todas as transações de faturas de cartão de crédito em PDF.
     Retorna DataFrame com uma linha por transação.
     """
-    _ensure_google_key()
-
     if not user_pdf_list:
         return pd.DataFrame(columns=TRANSACTION_COLUMNS)
 
-    llm = ChatGoogleGenerativeAI(
-        model=model_name,
-        temperature=0,
-        convert_system_message_to_human=True,
-    )
+    llm = ChatOllama(model=model_name, temperature=0)
     prompt = PromptTemplate.from_template(EXPENSE_EXTRACTION_PROMPT)
     chain = prompt | llm | StrOutputParser()
 
@@ -225,8 +257,10 @@ def extract_transactions(
         loader = PyPDFLoader(pdf_path)
         pages = loader.load_and_split()
 
-        full_text = "\n\n".join(p.page_content for p in pages)
-        raw_answer = chain.invoke({"context": full_text})
+        full_text = _filter_statement_text(
+            "\n\n".join(p.page_content for p in pages)
+        )
+        raw_answer = _invoke_with_retry(chain, {"context": full_text})
         time.sleep(2)
 
         parsed = _robust_json_parse(raw_answer)
@@ -318,18 +352,13 @@ def get_top_merchants(df: pd.DataFrame, n: int = 10) -> pd.DataFrame:
 # Funções públicas de IA
 # ---------------------------------------------------------------------------
 
-def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-2.0-flash-lite") -> str:
+def get_ai_insights(df: pd.DataFrame, model_name: str = "llama3.2") -> str:
     """Gera análise completa e recomendações de gastos usando IA."""
-    _ensure_google_key()
     if df.empty:
         return "Nenhum dado disponível para análise."
 
     spending_data = _spending_summary_text(df)
-    llm = ChatGoogleGenerativeAI(
-        model=model_name,
-        temperature=0.3,
-        convert_system_message_to_human=True,
-    )
+    llm = ChatOllama(model=model_name, temperature=0.3)
     response = llm.invoke(
         [HumanMessage(content=ANALYSIS_PROMPT.format(spending_data=spending_data))]
     )
@@ -337,19 +366,14 @@ def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-2.0-flash-lite")
 
 
 def chat_about_spending(
-    df: pd.DataFrame, question: str, model_name: str = "gemini-2.0-flash-lite"
+    df: pd.DataFrame, question: str, model_name: str = "llama3.2"
 ) -> str:
     """Responde perguntas sobre os gastos usando IA."""
-    _ensure_google_key()
     if df.empty:
         return "Nenhum dado disponível. Por favor, carregue suas faturas primeiro."
 
     spending_data = _spending_summary_text(df)
-    llm = ChatGoogleGenerativeAI(
-        model=model_name,
-        temperature=0.3,
-        convert_system_message_to_human=True,
-    )
+    llm = ChatOllama(model=model_name, temperature=0.3)
     prompt_text = CHAT_PROMPT.format(spending_data=spending_data, question=question)
     response = llm.invoke([HumanMessage(content=prompt_text)])
     return response.content

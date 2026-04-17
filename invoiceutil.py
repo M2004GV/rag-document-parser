@@ -9,7 +9,7 @@ from typing import List, Any, Dict
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
 
 INVOICE_PROMPT_TEMPLATE = """
@@ -55,11 +55,34 @@ COLUMNS = [
     "Address",
 ]
 
-def _ensure_google_key():
-    if not os.getenv("GOOGLE_API_KEY"):
-        raise EnvironmentError(
-            "GOOGLE_API_KEY não encontrado nas variáveis de ambiente (.env)."
-        )
+
+def _invoke_with_retry(chain, input_data, max_retries: int = 3):
+    for attempt in range(max_retries):
+        try:
+            return chain.invoke(input_data)
+        except Exception as e:
+            msg = str(e)
+            if "RESOURCE_EXHAUSTED" not in msg and "429" not in msg:
+                raise
+            if "PerDay" in msg:
+                raise RuntimeError(
+                    "Cota diária da API Google esgotada. Aguarde até amanhã ou "
+                    "ative o faturamento em: https://ai.google.dev/gemini-api/docs/rate-limits"
+                ) from e
+            match = re.search(r"retry in (\d+)", msg)
+            wait = int(match.group(1)) + 5 if match else 65
+            if attempt < max_retries - 1:
+                time.sleep(wait)
+            else:
+                raise RuntimeError(
+                    f"Limite por minuto atingido após {max_retries} tentativas. "
+                    "Aguarde alguns minutos e tente novamente."
+                ) from e
+
+
+def _truncate_text(text: str, max_chars: int = 8_000) -> str:
+    return text[:max_chars]
+
 
 def _strip_currency_symbols(s: str) -> str:
     if not isinstance(s, str):
@@ -119,22 +142,16 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
 
 def create_docs(
     user_pdf_list: List[Any],
-    model_name: str = "gemini-2.0-flash-lite",
+    model_name: str = "llama3.2",
 ) -> pd.DataFrame:
     """
     Recebe a lista do st.file_uploader (UploadedFile) e retorna um DataFrame
     com os campos extraídos por arquivo.
     """
-    _ensure_google_key()
-
     if not user_pdf_list:
         return pd.DataFrame(columns=COLUMNS)
 
-    llm = ChatGoogleGenerativeAI(
-        model=model_name,
-        temperature=0,
-        convert_system_message_to_human=True,
-    )
+    llm = ChatOllama(model=model_name, temperature=0)
     prompt = PromptTemplate.from_template(INVOICE_PROMPT_TEMPLATE)
     chain = prompt | llm | StrOutputParser()
 
@@ -145,8 +162,8 @@ def create_docs(
         loader = PyPDFLoader(pdf_path)
         pages = loader.load_and_split()
 
-        full_text = "\n\n".join(p.page_content for p in pages)
-        raw_answer = chain.invoke({"context": full_text})
+        full_text = _truncate_text("\n\n".join(p.page_content for p in pages))
+        raw_answer = _invoke_with_retry(chain, {"context": full_text})
         time.sleep(2)
 
         parsed = _robust_json_parse(raw_answer)

@@ -33,7 +33,11 @@ def render_expense_tab():
             return
 
         with st.spinner("Extraindo transações das faturas..."):
-            df = eu.extract_transactions(uploaded)
+            try:
+                df = eu.extract_transactions(uploaded)
+            except RuntimeError as e:
+                st.error(str(e))
+                return
 
         if df.empty:
             st.error("Não foi possível extrair transações. Verifique os arquivos enviados.")
@@ -228,7 +232,11 @@ def render_invoice_tab():
             st.warning("Selecione ao menos um arquivo PDF.")
             return
         with st.spinner("Extraindo dados..."):
-            df = iu.create_docs(pdf)
+            try:
+                df = iu.create_docs(pdf)
+            except RuntimeError as e:
+                st.error(str(e))
+                return
         if df.empty:
             st.info("Nenhum arquivo processado ou sem dados extraídos.")
         else:

@@ -3,18 +3,14 @@ import os
 import re
 import json
 import tempfile
+import time
 from typing import List, Any, Dict
 
 import pandas as pd
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import FAISS
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
-    GoogleGenerativeAIEmbeddings
-)
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers import StrOutputParser
 
 INVOICE_PROMPT_TEMPLATE = """
 Você é um extrator de dados de faturas. Extraia APENAS os campos pedidos do conteúdo abaixo.
@@ -123,9 +119,7 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
 
 def create_docs(
     user_pdf_list: List[Any],
-    model_name: str = "gemini-2.0-flash",
-    embedding_model: str = "models/embedding-001",
-    retriever_k: int = 6
+    model_name: str = "gemini-2.0-flash-lite",
 ) -> pd.DataFrame:
     """
     Recebe a lista do st.file_uploader (UploadedFile) e retorna um DataFrame
@@ -141,25 +135,19 @@ def create_docs(
         temperature=0,
         convert_system_message_to_human=True,
     )
-    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model)
     prompt = PromptTemplate.from_template(INVOICE_PROMPT_TEMPLATE)
+    chain = prompt | llm | StrOutputParser()
 
     rows = []
 
     for uploaded in user_pdf_list:
         pdf_path = _save_uploaded_to_temp(uploaded)
-
         loader = PyPDFLoader(pdf_path)
         pages = loader.load_and_split()
 
-        vector = FAISS.from_documents(pages, embeddings)
-        retriever = vector.as_retriever(search_kwargs={"k": retriever_k})
-
-        document_chain = create_stuff_documents_chain(llm, prompt)
-        retrieval_chain = create_retrieval_chain(retriever, document_chain)
-
-        response = retrieval_chain.invoke({"input": ""})
-        raw_answer = response.get("answer", "") or response.get("result", "")
+        full_text = "\n\n".join(p.page_content for p in pages)
+        raw_answer = chain.invoke({"context": full_text})
+        time.sleep(2)
 
         parsed = _robust_json_parse(raw_answer)
         normalized = _postprocess_json_fields(parsed)

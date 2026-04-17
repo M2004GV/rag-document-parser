@@ -2,11 +2,13 @@
 
 Aplicação prática de **Geração Aumentada por Recuperação (RAG)** para extração e análise inteligente de faturas de cartão de crédito e notas fiscais em PDF, desenvolvida como parte do curso **Introduction to RAG** (Coursera).
 
+Roda **100% local** — sem API key, sem internet durante o uso, sem limites de cota.
+
 ---
 
 ## Visão Geral
 
-O sistema processa documentos PDF com uma pipeline RAG completa: carrega e vetoriza o conteúdo, recupera trechos relevantes por similaridade semântica e envia o contexto enriquecido ao modelo de linguagem (Google Gemini) para extração e análise precisa dos dados.
+O sistema processa documentos PDF com uma pipeline RAG simplificada: carrega o conteúdo do PDF, filtra as linhas relevantes (transações e valores) e envia o contexto diretamente ao modelo de linguagem local (**LLaMA 3.2 via Ollama**) para extração e análise precisa dos dados.
 
 A interface é construída em **Streamlit** e organizada em três abas:
 
@@ -44,20 +46,18 @@ Processa múltiplos PDFs de notas fiscais e retorna os campos-chave (número, de
 
 ---
 
-## Arquitetura RAG
+## Arquitetura
 
 ```
-PDF(s) → Loader → Chunks → Embeddings → FAISS (vector store)
-                                               ↓
-                              Similarity Search → Contexto relevante
-                                               ↓
-                              Prompt aumentado → Gemini (LLM) → Resposta estruturada
+PDF(s) → PyPDFLoader → Filtro de linhas relevantes → Contexto compacto
+                                                            ↓
+                                             Prompt → LLaMA 3.2 (Ollama) → Resposta estruturada
 ```
 
 **Tecnologias utilizadas:**
-- [LangChain](https://python.langchain.com/) `>=0.3` — pipeline RAG (retrieval chain, stuff documents chain)
-- [Google Gemini](https://ai.google.dev/) — LLM e embeddings via `langchain-google-genai`
-- [FAISS](https://faiss.ai/) — banco de dados vetorial em memória
+- [Ollama](https://ollama.com/) — servidor local de modelos LLM
+- [LLaMA 3.2](https://ollama.com/library/llama3.2) — modelo de linguagem rodando na sua máquina
+- [LangChain](https://python.langchain.com/) `>=0.3` — pipeline de processamento (LCEL)
 - [Streamlit](https://streamlit.io/) — interface web
 - [Plotly](https://plotly.com/python/) — gráficos interativos
 
@@ -68,16 +68,59 @@ PDF(s) → Loader → Chunks → Embeddings → FAISS (vector store)
 ### Pré-requisitos
 
 - Python **3.11** ou superior
-- Uma **chave de API do Google Gemini** (gratuita em [aistudio.google.com](https://aistudio.google.com/app/apikey))
+- **8 GB de RAM** recomendado (mínimo 4 GB com o modelo de 1B)
+- [Ollama](https://ollama.com/) instalado
 
-### 1. Clone o repositório
+---
+
+### 1. Instale o Ollama
+
+**Linux:**
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+**macOS / Windows:** baixe o instalador em [ollama.com/download](https://ollama.com/download)
+
+---
+
+### 2. Baixe o modelo LLaMA 3.2
+
+```bash
+ollama pull llama3.2
+```
+
+> O download é de aproximadamente **2 GB**. Necessita de pelo menos **8 GB de RAM**.  
+> Se a sua máquina tiver pouca memória, use a versão menor:
+> ```bash
+> ollama pull llama3.2:1b
+> ```
+> E altere o modelo padrão em `expenseutil.py` e `invoiceutil.py` para `"llama3.2:1b"`.
+
+---
+
+### 3. Verifique se o Ollama está rodando
+
+```bash
+ollama list
+```
+
+Você deve ver `llama3.2` na lista. O serviço sobe automaticamente após a instalação. Caso não esteja ativo:
+
+```bash
+ollama serve
+```
+
+---
+
+### 4. Clone o repositório
 
 ```bash
 git clone https://github.com/M2004GV/rag-document-parser.git
 cd rag-document-parser
 ```
 
-### 2. Crie e ative um ambiente virtual
+### 5. Crie e ative um ambiente virtual
 
 ```bash
 # Criar
@@ -90,34 +133,21 @@ source .venv/bin/activate
 .venv\Scripts\activate
 ```
 
-### 3. Instale as dependências
+### 6. Instale as dependências Python
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure as variáveis de ambiente
-
-```bash
-# Copie o arquivo de exemplo
-cp .env.example .env
-```
-
-Abra o arquivo `.env` e substitua o valor pelo sua chave real:
-
-```env
-GOOGLE_API_KEY=sua_chave_aqui
-```
-
-> Obtenha sua chave gratuitamente em: [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
-
-### 5. Execute a aplicação
+### 7. Execute a aplicação
 
 ```bash
 streamlit run invoice-extraction.py
 ```
 
 A aplicação abrirá automaticamente no navegador em `http://localhost:8501`.
+
+> Nenhuma chave de API ou arquivo `.env` é necessário.
 
 ---
 
@@ -139,6 +169,6 @@ rag-document-parser/
 ├── expenseutil.py          # Lógica RAG para faturas de cartão
 ├── invoiceutil.py          # Lógica RAG para notas fiscais
 ├── requirements.txt        # Dependências Python
-├── .env.example            # Modelo de variáveis de ambiente
+├── .env.example            # Referência (sem chaves necessárias)
 └── .gitignore
 ```

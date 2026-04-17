@@ -133,6 +133,30 @@ def _ensure_google_key():
         )
 
 
+def _invoke_with_retry(chain, input_data, max_retries: int = 3):
+    for attempt in range(max_retries):
+        try:
+            return chain.invoke(input_data)
+        except Exception as e:
+            msg = str(e)
+            if "RESOURCE_EXHAUSTED" not in msg and "429" not in msg:
+                raise
+            if "PerDay" in msg:
+                raise RuntimeError(
+                    "Cota diária da API Google esgotada. Aguarde até amanhã ou "
+                    "ative o faturamento em: https://ai.google.dev/gemini-api/docs/rate-limits"
+                ) from e
+            match = re.search(r"retry in (\d+)", msg)
+            wait = int(match.group(1)) + 5 if match else 65
+            if attempt < max_retries - 1:
+                time.sleep(wait)
+            else:
+                raise RuntimeError(
+                    f"Limite por minuto atingido após {max_retries} tentativas. "
+                    "Aguarde alguns minutos e tente novamente."
+                ) from e
+
+
 def _save_uploaded_to_temp(uploaded_file) -> str:
     suffix = os.path.splitext(uploaded_file.name)[1] or ".pdf"
     tmpdir = tempfile.mkdtemp(prefix="expenses_")
@@ -226,7 +250,7 @@ def extract_transactions(
         pages = loader.load_and_split()
 
         full_text = "\n\n".join(p.page_content for p in pages)
-        raw_answer = chain.invoke({"context": full_text})
+        raw_answer = _invoke_with_retry(chain, {"context": full_text})
         time.sleep(2)
 
         parsed = _robust_json_parse(raw_answer)

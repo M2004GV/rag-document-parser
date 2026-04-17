@@ -3,6 +3,7 @@ import os
 import re
 import json
 import tempfile
+import time
 from typing import List, Any, Dict
 
 import pandas as pd
@@ -198,7 +199,7 @@ def _spending_summary_text(df: pd.DataFrame) -> str:
 
 def extract_transactions(
     user_pdf_list: List[Any],
-    model_name: str = "gemini-2.0-flash",
+    model_name: str = "gemini-1.5-flash",
 ) -> pd.DataFrame:
     """
     Extrai todas as transações de faturas de cartão de crédito em PDF.
@@ -226,6 +227,7 @@ def extract_transactions(
 
         full_text = "\n\n".join(p.page_content for p in pages)
         raw_answer = chain.invoke({"context": full_text})
+        time.sleep(2)
 
         parsed = _robust_json_parse(raw_answer)
         mes_ref = parsed.get("mes_referencia", "")
@@ -316,7 +318,7 @@ def get_top_merchants(df: pd.DataFrame, n: int = 10) -> pd.DataFrame:
 # Funções públicas de IA
 # ---------------------------------------------------------------------------
 
-def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-2.0-flash") -> str:
+def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-1.5-flash") -> str:
     """Gera análise completa e recomendações de gastos usando IA."""
     _ensure_google_key()
     if df.empty:
@@ -335,7 +337,7 @@ def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-2.0-flash") -> s
 
 
 def chat_about_spending(
-    df: pd.DataFrame, question: str, model_name: str = "gemini-2.0-flash"
+    df: pd.DataFrame, question: str, model_name: str = "gemini-1.5-flash"
 ) -> str:
     """Responde perguntas sobre os gastos usando IA."""
     _ensure_google_key()

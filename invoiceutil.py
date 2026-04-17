@@ -3,6 +3,7 @@ import os
 import re
 import json
 import tempfile
+import time
 from typing import List, Any, Dict
 
 import pandas as pd
@@ -118,7 +119,7 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
 
 def create_docs(
     user_pdf_list: List[Any],
-    model_name: str = "gemini-2.0-flash",
+    model_name: str = "gemini-1.5-flash",
 ) -> pd.DataFrame:
     """
     Recebe a lista do st.file_uploader (UploadedFile) e retorna um DataFrame
@@ -146,6 +147,7 @@ def create_docs(
 
         full_text = "\n\n".join(p.page_content for p in pages)
         raw_answer = chain.invoke({"context": full_text})
+        time.sleep(2)
 
         parsed = _robust_json_parse(raw_answer)
         normalized = _postprocess_json_fields(parsed)

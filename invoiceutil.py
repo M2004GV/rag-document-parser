@@ -6,7 +6,7 @@ import tempfile
 from typing import List, Any, Dict
 
 import pandas as pd
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from langchain.chains import create_retrieval_chain

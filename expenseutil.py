@@ -203,7 +203,7 @@ def _spending_summary_text(df: pd.DataFrame) -> str:
 def extract_transactions(
     user_pdf_list: List[Any],
     model_name: str = "gemini-2.0-flash",
-    embedding_model: str = "models/embedding-001",
+    embedding_model: str = "models/text-embedding-004",
     retriever_k: int = 10,
 ) -> pd.DataFrame:
     """

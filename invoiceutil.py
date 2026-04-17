@@ -123,7 +123,7 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
 def create_docs(
     user_pdf_list: List[Any],
     model_name: str = "gemini-2.0-flash",
-    embedding_model: str = "models/embedding-001",
+    embedding_model: str = "models/text-embedding-004",
     retriever_k: int = 6
 ) -> pd.DataFrame:
     """

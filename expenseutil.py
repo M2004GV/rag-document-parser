@@ -166,6 +166,27 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
     return path
 
 
+def _filter_statement_text(text: str, max_chars: int = 10_000) -> str:
+    """Mantém apenas linhas com datas ou valores monetários (as transações).
+    Remove cabeçalhos, rodapés e textos jurídicos — reduz ~70% dos tokens."""
+    lines = text.split("\n")
+    result = []
+    prev_kept = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            prev_kept = False
+            continue
+        has_date = bool(re.search(r"\b\d{2}/\d{2}\b", stripped))
+        has_amount = bool(re.search(r"\b\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\b", stripped))
+        keep = has_date or has_amount or prev_kept
+        if keep:
+            result.append(stripped)
+        prev_kept = has_date or has_amount
+    filtered = "\n".join(result) if result else text
+    return filtered[:max_chars]
+
+
 def _robust_json_parse(text: str) -> Dict[str, Any]:
     if not text:
         return {}
@@ -249,7 +270,9 @@ def extract_transactions(
         loader = PyPDFLoader(pdf_path)
         pages = loader.load_and_split()
 
-        full_text = "\n\n".join(p.page_content for p in pages)
+        full_text = _filter_statement_text(
+            "\n\n".join(p.page_content for p in pages)
+        )
         raw_answer = _invoke_with_retry(chain, {"context": full_text})
         time.sleep(2)
 

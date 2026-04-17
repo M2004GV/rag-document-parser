@@ -86,6 +86,10 @@ def _invoke_with_retry(chain, input_data, max_retries: int = 3):
                 ) from e
 
 
+def _truncate_text(text: str, max_chars: int = 8_000) -> str:
+    return text[:max_chars]
+
+
 def _strip_currency_symbols(s: str) -> str:
     if not isinstance(s, str):
         return s
@@ -170,7 +174,7 @@ def create_docs(
         loader = PyPDFLoader(pdf_path)
         pages = loader.load_and_split()
 
-        full_text = "\n\n".join(p.page_content for p in pages)
+        full_text = _truncate_text("\n\n".join(p.page_content for p in pages))
         raw_answer = _invoke_with_retry(chain, {"context": full_text})
         time.sleep(2)
 

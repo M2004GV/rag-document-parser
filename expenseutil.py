@@ -244,7 +244,7 @@ def _spending_summary_text(df: pd.DataFrame) -> str:
 
 def extract_transactions(
     user_pdf_list: List[Any],
-    model_name: str = "gemini-2.0-flash-lite",
+    model_name: str = "gemini-2.0-flash",
 ) -> pd.DataFrame:
     """
     Extrai todas as transações de faturas de cartão de crédito em PDF.
@@ -365,7 +365,7 @@ def get_top_merchants(df: pd.DataFrame, n: int = 10) -> pd.DataFrame:
 # Funções públicas de IA
 # ---------------------------------------------------------------------------
 
-def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-2.0-flash-lite") -> str:
+def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-2.0-flash") -> str:
     """Gera análise completa e recomendações de gastos usando IA."""
     _ensure_google_key()
     if df.empty:
@@ -384,7 +384,7 @@ def get_ai_insights(df: pd.DataFrame, model_name: str = "gemini-2.0-flash-lite")
 
 
 def chat_about_spending(
-    df: pd.DataFrame, question: str, model_name: str = "gemini-2.0-flash-lite"
+    df: pd.DataFrame, question: str, model_name: str = "gemini-2.0-flash"
 ) -> str:
     """Responde perguntas sobre os gastos usando IA."""
     _ensure_google_key()

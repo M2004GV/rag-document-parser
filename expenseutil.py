@@ -8,11 +8,7 @@ from typing import List, Any, Dict
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import FAISS
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
-    GoogleGenerativeAIEmbeddings,
-)
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 
@@ -203,8 +199,6 @@ def _spending_summary_text(df: pd.DataFrame) -> str:
 def extract_transactions(
     user_pdf_list: List[Any],
     model_name: str = "gemini-2.0-flash",
-    embedding_model: str = "models/text-embedding-004",
-    retriever_k: int = 10,
 ) -> pd.DataFrame:
     """
     Extrai todas as transações de faturas de cartão de crédito em PDF.
@@ -220,8 +214,8 @@ def extract_transactions(
         temperature=0,
         convert_system_message_to_human=True,
     )
-    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model)
     prompt = PromptTemplate.from_template(EXPENSE_EXTRACTION_PROMPT)
+    chain = prompt | llm | StrOutputParser()
 
     all_rows = []
 
@@ -230,15 +224,8 @@ def extract_transactions(
         loader = PyPDFLoader(pdf_path)
         pages = loader.load_and_split()
 
-        vector = FAISS.from_documents(pages, embeddings)
-        retriever = vector.as_retriever(search_kwargs={"k": retriever_k})
-        chain = (
-            {"context": retriever | (lambda docs: "\n\n".join(d.page_content for d in docs))}
-            | prompt
-            | llm
-            | StrOutputParser()
-        )
-        raw_answer = chain.invoke("")
+        full_text = "\n\n".join(p.page_content for p in pages)
+        raw_answer = chain.invoke({"context": full_text})
 
         parsed = _robust_json_parse(raw_answer)
         mes_ref = parsed.get("mes_referencia", "")

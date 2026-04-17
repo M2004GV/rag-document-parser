@@ -8,11 +8,7 @@ from typing import List, Any, Dict
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import FAISS
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
-    GoogleGenerativeAIEmbeddings,
-)
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
 
 INVOICE_PROMPT_TEMPLATE = """
@@ -123,8 +119,6 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
 def create_docs(
     user_pdf_list: List[Any],
     model_name: str = "gemini-2.0-flash",
-    embedding_model: str = "models/text-embedding-004",
-    retriever_k: int = 6
 ) -> pd.DataFrame:
     """
     Recebe a lista do st.file_uploader (UploadedFile) e retorna um DataFrame
@@ -140,26 +134,18 @@ def create_docs(
         temperature=0,
         convert_system_message_to_human=True,
     )
-    embeddings = GoogleGenerativeAIEmbeddings(model=embedding_model)
     prompt = PromptTemplate.from_template(INVOICE_PROMPT_TEMPLATE)
+    chain = prompt | llm | StrOutputParser()
 
     rows = []
 
     for uploaded in user_pdf_list:
         pdf_path = _save_uploaded_to_temp(uploaded)
-
         loader = PyPDFLoader(pdf_path)
         pages = loader.load_and_split()
 
-        vector = FAISS.from_documents(pages, embeddings)
-        retriever = vector.as_retriever(search_kwargs={"k": retriever_k})
-        chain = (
-            {"context": retriever | (lambda docs: "\n\n".join(d.page_content for d in docs))}
-            | prompt
-            | llm
-            | StrOutputParser()
-        )
-        raw_answer = chain.invoke("")
+        full_text = "\n\n".join(p.page_content for p in pages)
+        raw_answer = chain.invoke({"context": full_text})
 
         parsed = _robust_json_parse(raw_answer)
         normalized = _postprocess_json_fields(parsed)

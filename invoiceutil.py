@@ -119,7 +119,7 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
 
 def create_docs(
     user_pdf_list: List[Any],
-    model_name: str = "gemini-1.5-flash",
+    model_name: str = "gemini-2.0-flash-lite",
 ) -> pd.DataFrame:
     """
     Recebe a lista do st.file_uploader (UploadedFile) e retorna um DataFrame

@@ -9,12 +9,11 @@ import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_google_genai import (
     ChatGoogleGenerativeAI,
-    GoogleGenerativeAIEmbeddings
+    GoogleGenerativeAIEmbeddings,
 )
+from langchain_core.output_parsers import StrOutputParser
 
 INVOICE_PROMPT_TEMPLATE = """
 Você é um extrator de dados de faturas. Extraia APENAS os campos pedidos do conteúdo abaixo.
@@ -154,12 +153,13 @@ def create_docs(
 
         vector = FAISS.from_documents(pages, embeddings)
         retriever = vector.as_retriever(search_kwargs={"k": retriever_k})
-
-        document_chain = create_stuff_documents_chain(llm, prompt)
-        retrieval_chain = create_retrieval_chain(retriever, document_chain)
-
-        response = retrieval_chain.invoke({"input": ""})
-        raw_answer = response.get("answer", "") or response.get("result", "")
+        chain = (
+            {"context": retriever | (lambda docs: "\n\n".join(d.page_content for d in docs))}
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+        raw_answer = chain.invoke("")
 
         parsed = _robust_json_parse(raw_answer)
         normalized = _postprocess_json_fields(parsed)

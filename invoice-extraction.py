@@ -167,9 +167,10 @@ def render_expense_tab():
         key="expense_uploader",
     )
 
-    c1, c2, c3 = st.columns([2, 2, 3])
+    c1, c2, c3 = st.columns([2, 2, 2])
     extract_btn = c1.button("Extrair Transações", type="primary")
     load_btn = c2.button("Carregar histórico")
+    clear_btn = c3.button("Limpar histórico")
 
     # Carregar histórico salvo do banco (item 2).
     if load_btn:
@@ -179,6 +180,13 @@ def render_expense_tab():
         else:
             st.session_state["expense_df"] = hist
             st.success(f"{len(hist)} transações carregadas do histórico.")
+
+    # Limpar o histórico persistido (recupera de uma base poluída por duplicatas).
+    if clear_btn:
+        storage.clear_transactions(_user_id())
+        st.session_state.pop("expense_df", None)
+        st.success("Histórico apagado. Reimporte seus arquivos para começar do zero.")
+        st.rerun()
 
     if extract_btn:
         if not uploaded:
@@ -232,9 +240,18 @@ def _do_extract(uploaded):
         st.error("Não foi possível extrair transações. Verifique os arquivos enviados.")
         return
 
+    # Remove repetições dentro do próprio lote (ex.: mesmo arquivo carregado 2x).
+    df = df.drop_duplicates(
+        subset=["arquivo", "mes_referencia", "data", "descricao", "valor", "parcela"]
+    ).reset_index(drop=True)
+
     st.session_state["expense_df"] = df
-    saved = storage.save_transactions(_user_id(), df)  # persiste (item 2)
-    st.success(f"{len(df)} transações extraídas de {len(uploaded)} arquivo(s) — {saved} salvas no histórico.")
+    saved = storage.save_transactions(_user_id(), df)  # persiste (item 2), idempotente
+    skipped = len(df) - saved
+    msg = f"{len(df)} transações extraídas de {len(uploaded)} arquivo(s) — {saved} novas no histórico."
+    if skipped:
+        msg += f" {skipped} já existiam e foram ignoradas."
+    st.success(msg)
 
 
 def _render_kpis(df):

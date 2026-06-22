@@ -37,6 +37,40 @@ def test_save_and_load_transactions(storage):
     assert loaded.iloc[0]["descricao"] == "IFOOD"
 
 
+def test_save_transactions_is_idempotent(storage):
+    """Reimportar o mesmo arquivo não deve duplicar transações no histórico."""
+    uid = storage.create_user(" frank ".strip(), "x")
+    df = pd.DataFrame([
+        {"arquivo": "nubank.ofx", "mes_referencia": "03/2026", "data": "10/03/2026",
+         "descricao": "MERCADO", "categoria": "Supermercado", "valor": 99.9, "parcela": ""},
+        {"arquivo": "nubank.ofx", "mes_referencia": "03/2026", "data": "11/03/2026",
+         "descricao": "UBER", "categoria": "Transporte", "valor": 23.5, "parcela": ""},
+    ])
+    assert storage.save_transactions(uid, df) == 2
+    # Segundo e terceiro envios do mesmo lote não inserem nada novo.
+    assert storage.save_transactions(uid, df) == 0
+    assert storage.save_transactions(uid, df) == 0
+    assert len(storage.load_transactions(uid)) == 2
+
+
+def test_migration_dedupes_legacy_rows(storage):
+    """Linhas duplicadas pré-existentes são removidas ao reinicializar o banco."""
+    uid = storage.create_user("grace", "x")
+    row = (uid, "f.ofx", "03/2026", "10/03/2026", "X", "Outros", 10.0, "")
+    # Insere a mesma transação 3x diretamente, simulando uma base poluída.
+    with storage._connect() as conn:
+        conn.execute("DROP INDEX IF EXISTS idx_tx_natural")
+        conn.executemany(
+            """INSERT INTO transactions
+               (user_id, arquivo, mes_referencia, data, descricao, categoria, valor, parcela)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            [row, row, row],
+        )
+    assert len(storage.load_transactions(uid)) == 3
+    storage.init_db()  # dispara a migração de dedup
+    assert len(storage.load_transactions(uid)) == 1
+
+
 def test_transactions_scoped_per_user(storage):
     u1 = storage.create_user("u1", "x")
     u2 = storage.create_user("u2", "x")

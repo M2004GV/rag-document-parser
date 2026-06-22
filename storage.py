@@ -101,9 +101,39 @@ def init_db() -> None:
             );
             """
         )
+    # Garante idempotência das transações: limpa duplicatas herdadas e cria o
+    # índice único que impede novas inserções repetidas (ver save_transactions).
+    _migrate_dedupe_transactions()
     # Usuário convidado sempre disponível (senha aleatória, não usada para login).
     if get_user_id(GUEST_USERNAME) is None:
         create_user(GUEST_USERNAME, secrets.token_hex(16))
+
+
+# Chave natural que identifica uma transação repetida (mesmo arquivo reimportado).
+_TX_NATURAL_KEY = (
+    "user_id", "arquivo", "mes_referencia", "data", "descricao", "valor", "parcela"
+)
+
+
+def _migrate_dedupe_transactions() -> None:
+    """Remove transações duplicadas pré-existentes e cria o índice único.
+
+    Bancos criados antes da correção podem conter a mesma transação várias
+    vezes (reimportação do mesmo arquivo). Mantemos a linha de menor ``id`` de
+    cada grupo e só então criamos o índice único — caso contrário a criação
+    falharia sobre dados já duplicados.
+    """
+    key = ", ".join(_TX_NATURAL_KEY)
+    with _connect() as conn:
+        conn.execute(
+            f"""DELETE FROM transactions
+                WHERE id NOT IN (
+                    SELECT MIN(id) FROM transactions GROUP BY {key}
+                )"""
+        )
+        conn.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_natural ON transactions ({key})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +199,12 @@ def guest_user_id() -> int:
 # ---------------------------------------------------------------------------
 
 def save_transactions(user_id: int, df: pd.DataFrame) -> int:
-    """Acrescenta as transações do DataFrame ao histórico do usuário."""
+    """Acrescenta as transações novas ao histórico do usuário.
+
+    A inserção é idempotente: reimportar o mesmo arquivo (mesma transação na
+    chave natural) é ignorado em vez de duplicado. Retorna a quantidade de
+    transações efetivamente inseridas (novas), não o total enviado.
+    """
     if df is None or df.empty:
         return 0
     rows = [
@@ -186,13 +221,14 @@ def save_transactions(user_id: int, df: pd.DataFrame) -> int:
         for r in df.to_dict("records")
     ]
     with _connect() as conn:
+        before = conn.total_changes
         conn.executemany(
-            """INSERT INTO transactions
+            """INSERT OR IGNORE INTO transactions
                (user_id, arquivo, mes_referencia, data, descricao, categoria, valor, parcela)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             rows,
         )
-    return len(rows)
+        return conn.total_changes - before
 
 
 def load_transactions(user_id: int) -> pd.DataFrame:

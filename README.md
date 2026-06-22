@@ -46,6 +46,27 @@ Processa múltiplos PDFs de notas fiscais e retorna os campos-chave (número, de
 
 ---
 
+## Recursos avançados
+
+| Recurso | Descrição |
+|---------|-----------|
+| **Exportar CSV/Excel** | Baixe as transações, notas fiscais e a análise da IA com um clique. |
+| **Histórico em SQLite** | As extrações são salvas por usuário; recarregue meses anteriores sem reenviar PDFs. |
+| **Seletor de modelo** | Escolha o modelo do Ollama (`llama3.2`, `llama3.2:1b`, `mistral`, etc.) na barra lateral. |
+| **Gastos recorrentes** | Agrupa estabelecimentos similares e sinaliza prováveis assinaturas. |
+| **Categorias customizáveis** | Regras locais (texto → categoria) aplicadas antes da LLM, de forma determinística. |
+| **Orçamento por categoria** | Defina um teto mensal e receba alerta visual ao estourar. |
+| **Comparação mês a mês** | Variação % por categoria entre os dois meses mais recentes. |
+| **Previsão do mês** | Projeta o gasto do mês corrente combinando run-rate e média histórica. |
+| **Cache por hash do PDF** | O mesmo arquivo não é reprocessado pela LLM duas vezes. |
+| **OCR (opcional)** | Faturas escaneadas (só imagem) caem para `pytesseract`. |
+| **Importação OFX (opcional)** | Extratos OFX/Open Finance são importados sem precisar de LLM. |
+| **Multiusuário** | Login simples com senha (hash PBKDF2); dados isolados por conta. |
+
+> OCR e OFX exigem dependências extras — veja [Recursos opcionais](#recursos-opcionais).
+
+---
+
 ## Arquitetura
 
 ```
@@ -151,6 +172,55 @@ A aplicação abrirá automaticamente no navegador em `http://localhost:8501`.
 
 ---
 
+## Execução com Docker (um comando)
+
+Com Docker e Docker Compose instalados, suba a aplicação **e o Ollama juntos** —
+o modelo é baixado automaticamente na primeira execução:
+
+```bash
+docker compose up --build
+```
+
+Acesse `http://localhost:8501`. Para usar o modelo menor:
+
+```bash
+OLLAMA_MODEL=llama3.2:1b docker compose up --build
+```
+
+Os modelos do Ollama e o banco SQLite ficam em volumes persistentes (`ollama_models`, `app_data`).
+
+---
+
+## Recursos opcionais
+
+Os recursos de **OCR** (faturas escaneadas) e **OFX** (extratos bancários) precisam de
+bibliotecas extras. A imagem Docker já as inclui; para uso local:
+
+```bash
+# OCR — também requer os binários de sistema tesseract-ocr e poppler-utils
+pip install pytesseract pdf2image
+sudo apt-get install tesseract-ocr tesseract-ocr-por poppler-utils  # Debian/Ubuntu
+
+# Importação OFX
+pip install ofxparse
+```
+
+Sem essas dependências, a aplicação continua funcionando — apenas esses recursos ficam inativos.
+
+---
+
+## Testes
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+A suíte cobre o parsing de valores e JSON, filtragem de faturas, categorização,
+detecção de recorrentes, análises e a camada de persistência/autenticação.
+
+---
+
 ## Uso rápido
 
 1. **Aba "Gastos do Cartão"** → clique em *Selecione as faturas* → envie um ou mais PDFs → clique em *Extrair Transações*.
@@ -168,7 +238,17 @@ rag-document-parser/
 ├── invoice-extraction.py   # Aplicação Streamlit (interface)
 ├── expenseutil.py          # Lógica RAG para faturas de cartão
 ├── invoiceutil.py          # Lógica RAG para notas fiscais
+├── storage.py              # Persistência SQLite: histórico, cache, orçamentos, usuários
+├── categories.py           # Categorias e regras de categorização local
+├── recurring.py            # Detecção de gastos recorrentes/assinaturas
+├── analytics.py            # Orçamento, comparação mês a mês e previsão
+├── ocr.py                  # Fallback de OCR para faturas escaneadas (opcional)
+├── ofx_loader.py           # Importação de extratos OFX/Open Finance (opcional)
+├── tests/                  # Suíte pytest
+├── Dockerfile              # Imagem da aplicação
+├── docker-compose.yml      # App + Ollama em um comando
 ├── requirements.txt        # Dependências Python
+├── requirements-dev.txt    # Dependências de desenvolvimento (pytest)
 ├── .env.example            # Referência (sem chaves necessárias)
 └── .gitignore
 ```

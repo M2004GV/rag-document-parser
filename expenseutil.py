@@ -4,14 +4,28 @@ import re
 import json
 import tempfile
 import time
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
+
+import storage
+from categories import DEFAULT_CATEGORIES, apply_rules
+from ocr import load_pdf_text_with_ocr_fallback
+
+DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
+# Permite apontar para um Ollama remoto (ex.: container) via env (item 11).
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL")
+
+
+def _make_llm(model_name: str, temperature: float) -> ChatOllama:
+    kwargs = {"model": model_name, "temperature": temperature}
+    if OLLAMA_BASE_URL:
+        kwargs["base_url"] = OLLAMA_BASE_URL
+    return ChatOllama(**kwargs)
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -107,47 +121,27 @@ TRANSACTION_COLUMNS = [
     "parcela",
 ]
 
-CATEGORIAS = [
-    "Alimentação",
-    "Transporte",
-    "Compras",
-    "Lazer",
-    "Saúde",
-    "Educação",
-    "Serviços",
-    "Moradia",
-    "Viagem",
-    "Streaming",
-    "Supermercado",
-    "Outros",
-]
+# Categorias agora vivem em categories.py (fonte única).
+CATEGORIAS = DEFAULT_CATEGORIES
 
 # ---------------------------------------------------------------------------
 # Helpers internos
 # ---------------------------------------------------------------------------
 
-def _invoke_with_retry(chain, input_data, max_retries: int = 3):
+def _invoke_with_retry(chain, input_data, max_retries: int = 2):
+    """Retry simples para o Ollama local (ex.: servidor ainda subindo)."""
+    last_err: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
             return chain.invoke(input_data)
-        except Exception as e:
-            msg = str(e)
-            if "RESOURCE_EXHAUSTED" not in msg and "429" not in msg:
-                raise
-            if "PerDay" in msg:
-                raise RuntimeError(
-                    "Cota diária da API Google esgotada. Aguarde até amanhã ou "
-                    "ative o faturamento em: https://ai.google.dev/gemini-api/docs/rate-limits"
-                ) from e
-            match = re.search(r"retry in (\d+)", msg)
-            wait = int(match.group(1)) + 5 if match else 65
+        except Exception as e:  # conexão recusada, modelo carregando, etc.
+            last_err = e
             if attempt < max_retries - 1:
-                time.sleep(wait)
-            else:
-                raise RuntimeError(
-                    f"Limite por minuto atingido após {max_retries} tentativas. "
-                    "Aguarde alguns minutos e tente novamente."
-                ) from e
+                time.sleep(2)
+    raise RuntimeError(
+        "Falha ao chamar o modelo local via Ollama. Verifique se o serviço está "
+        f"ativo (`ollama serve`) e o modelo baixado. Detalhe: {last_err}"
+    ) from last_err
 
 
 def _save_uploaded_to_temp(uploaded_file) -> str:
@@ -237,33 +231,39 @@ def _spending_summary_text(df: pd.DataFrame) -> str:
 
 def extract_transactions(
     user_pdf_list: List[Any],
-    model_name: str = "llama3.2",
+    model_name: str = DEFAULT_MODEL,
+    rules: Optional[List[Dict[str, str]]] = None,
+    use_cache: bool = True,
 ) -> pd.DataFrame:
     """
     Extrai todas as transações de faturas de cartão de crédito em PDF.
     Retorna DataFrame com uma linha por transação.
+
+    - ``rules``: regras de categorização locais aplicadas após a LLM (item 6).
+    - ``use_cache``: reaproveita extrações de PDFs idênticos por hash (item 10).
     """
     if not user_pdf_list:
         return pd.DataFrame(columns=TRANSACTION_COLUMNS)
 
-    llm = ChatOllama(model=model_name, temperature=0)
+    llm = _make_llm(model_name, 0)
     prompt = PromptTemplate.from_template(EXPENSE_EXTRACTION_PROMPT)
     chain = prompt | llm | StrOutputParser()
 
     all_rows = []
 
     for uploaded in user_pdf_list:
-        pdf_path = _save_uploaded_to_temp(uploaded)
-        loader = PyPDFLoader(pdf_path)
-        pages = loader.load_and_split()
+        fhash = storage.file_hash(bytes(uploaded.getbuffer()))
+        parsed = storage.cache_get(fhash, "expense") if use_cache else None
 
-        full_text = _filter_statement_text(
-            "\n\n".join(p.page_content for p in pages)
-        )
-        raw_answer = _invoke_with_retry(chain, {"context": full_text})
-        time.sleep(2)
+        if parsed is None:
+            pdf_path = _save_uploaded_to_temp(uploaded)
+            # OCR fallback para faturas escaneadas (item 9).
+            full_text = _filter_statement_text(load_pdf_text_with_ocr_fallback(pdf_path))
+            raw_answer = _invoke_with_retry(chain, {"context": full_text})
+            parsed = _robust_json_parse(raw_answer)
+            if use_cache and parsed:
+                storage.cache_set(fhash, "expense", parsed)
 
-        parsed = _robust_json_parse(raw_answer)
         mes_ref = parsed.get("mes_referencia", "")
         transacoes = parsed.get("transacoes", [])
 
@@ -285,7 +285,9 @@ def extract_transactions(
 
     if not all_rows:
         return pd.DataFrame(columns=TRANSACTION_COLUMNS)
-    return pd.DataFrame(all_rows, columns=TRANSACTION_COLUMNS)
+    df = pd.DataFrame(all_rows, columns=TRANSACTION_COLUMNS)
+    # Reaplica regras locais de categorização (item 6).
+    return apply_rules(df, rules)
 
 
 # ---------------------------------------------------------------------------
@@ -352,13 +354,13 @@ def get_top_merchants(df: pd.DataFrame, n: int = 10) -> pd.DataFrame:
 # Funções públicas de IA
 # ---------------------------------------------------------------------------
 
-def get_ai_insights(df: pd.DataFrame, model_name: str = "llama3.2") -> str:
+def get_ai_insights(df: pd.DataFrame, model_name: str = DEFAULT_MODEL) -> str:
     """Gera análise completa e recomendações de gastos usando IA."""
     if df.empty:
         return "Nenhum dado disponível para análise."
 
     spending_data = _spending_summary_text(df)
-    llm = ChatOllama(model=model_name, temperature=0.3)
+    llm = _make_llm(model_name, 0.3)
     response = llm.invoke(
         [HumanMessage(content=ANALYSIS_PROMPT.format(spending_data=spending_data))]
     )
@@ -366,14 +368,14 @@ def get_ai_insights(df: pd.DataFrame, model_name: str = "llama3.2") -> str:
 
 
 def chat_about_spending(
-    df: pd.DataFrame, question: str, model_name: str = "llama3.2"
+    df: pd.DataFrame, question: str, model_name: str = DEFAULT_MODEL
 ) -> str:
     """Responde perguntas sobre os gastos usando IA."""
     if df.empty:
         return "Nenhum dado disponível. Por favor, carregue suas faturas primeiro."
 
     spending_data = _spending_summary_text(df)
-    llm = ChatOllama(model=model_name, temperature=0.3)
+    llm = _make_llm(model_name, 0.3)
     prompt_text = CHAT_PROMPT.format(spending_data=spending_data, question=question)
     response = llm.invoke([HumanMessage(content=prompt_text)])
     return response.content

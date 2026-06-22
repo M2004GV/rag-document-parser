@@ -6,3 +6,11 @@ python-dotenv
 pandas
 streamlit>=1.35.0
 plotly>=5.22.0
+openpyxl>=3.1.0
+
+# Opcionais — habilitam recursos extras (exigem dependências de sistema):
+#   OCR de faturas escaneadas (item 9): requer tesseract-ocr e poppler-utils
+# pytesseract>=0.3.10
+# pdf2image>=1.17.0
+#   Importação de extratos OFX/Open Finance (item 12):
+# ofxparse>=0.21

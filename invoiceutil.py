@@ -4,13 +4,25 @@ import re
 import json
 import tempfile
 import time
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
+
+import storage
+from ocr import load_pdf_text_with_ocr_fallback
+
+DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL")
+
+
+def _make_llm(model_name: str, temperature: float) -> ChatOllama:
+    kwargs = {"model": model_name, "temperature": temperature}
+    if OLLAMA_BASE_URL:
+        kwargs["base_url"] = OLLAMA_BASE_URL
+    return ChatOllama(**kwargs)
 
 INVOICE_PROMPT_TEMPLATE = """
 Você é um extrator de dados de faturas. Extraia APENAS os campos pedidos do conteúdo abaixo.
@@ -56,28 +68,20 @@ COLUMNS = [
 ]
 
 
-def _invoke_with_retry(chain, input_data, max_retries: int = 3):
+def _invoke_with_retry(chain, input_data, max_retries: int = 2):
+    """Retry simples para o Ollama local (ex.: servidor ainda subindo)."""
+    last_err: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
             return chain.invoke(input_data)
         except Exception as e:
-            msg = str(e)
-            if "RESOURCE_EXHAUSTED" not in msg and "429" not in msg:
-                raise
-            if "PerDay" in msg:
-                raise RuntimeError(
-                    "Cota diária da API Google esgotada. Aguarde até amanhã ou "
-                    "ative o faturamento em: https://ai.google.dev/gemini-api/docs/rate-limits"
-                ) from e
-            match = re.search(r"retry in (\d+)", msg)
-            wait = int(match.group(1)) + 5 if match else 65
+            last_err = e
             if attempt < max_retries - 1:
-                time.sleep(wait)
-            else:
-                raise RuntimeError(
-                    f"Limite por minuto atingido após {max_retries} tentativas. "
-                    "Aguarde alguns minutos e tente novamente."
-                ) from e
+                time.sleep(2)
+    raise RuntimeError(
+        "Falha ao chamar o modelo local via Ollama. Verifique se o serviço está "
+        f"ativo (`ollama serve`) e o modelo baixado. Detalhe: {last_err}"
+    ) from last_err
 
 
 def _truncate_text(text: str, max_chars: int = 8_000) -> str:
@@ -142,40 +146,39 @@ def _save_uploaded_to_temp(uploaded_file) -> str:
 
 def create_docs(
     user_pdf_list: List[Any],
-    model_name: str = "llama3.2",
+    model_name: str = DEFAULT_MODEL,
+    use_cache: bool = True,
 ) -> pd.DataFrame:
     """
     Recebe a lista do st.file_uploader (UploadedFile) e retorna um DataFrame
     com os campos extraídos por arquivo.
+
+    - OCR fallback para notas escaneadas (item 9).
+    - Cache por hash do PDF para não reprocessar o mesmo arquivo (item 10).
     """
     if not user_pdf_list:
         return pd.DataFrame(columns=COLUMNS)
 
-    llm = ChatOllama(model=model_name, temperature=0)
+    llm = _make_llm(model_name, 0)
     prompt = PromptTemplate.from_template(INVOICE_PROMPT_TEMPLATE)
     chain = prompt | llm | StrOutputParser()
 
     rows = []
 
     for uploaded in user_pdf_list:
-        pdf_path = _save_uploaded_to_temp(uploaded)
-        loader = PyPDFLoader(pdf_path)
-        pages = loader.load_and_split()
+        fhash = storage.file_hash(bytes(uploaded.getbuffer()))
+        normalized = storage.cache_get(fhash, "invoice") if use_cache else None
 
-        full_text = _truncate_text("\n\n".join(p.page_content for p in pages))
-        raw_answer = _invoke_with_retry(chain, {"context": full_text})
-        time.sleep(2)
+        if normalized is None:
+            pdf_path = _save_uploaded_to_temp(uploaded)
+            full_text = _truncate_text(load_pdf_text_with_ocr_fallback(pdf_path))
+            raw_answer = _invoke_with_retry(chain, {"context": full_text})
+            parsed = _robust_json_parse(raw_answer)
+            normalized = _postprocess_json_fields(parsed)
+            if use_cache and any(normalized.values()):
+                storage.cache_set(fhash, "invoice", normalized)
 
-        parsed = _robust_json_parse(raw_answer)
-        normalized = _postprocess_json_fields(parsed)
-
-        row = {
-            "file": uploaded.name,
-            **normalized
-        }
-        rows.append(row)
-
-
+        rows.append({"file": uploaded.name, **normalized})
 
     df = pd.DataFrame(rows, columns=COLUMNS)
     return df

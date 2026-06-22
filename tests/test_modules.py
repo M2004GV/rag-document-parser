@@ -65,6 +65,18 @@ class TestAnalytics:
         mom = analytics.month_over_month(_sample_df())
         assert "variacao_%" in mom.columns
 
+    def test_month_over_month_new_category_no_typeerror(self):
+        # Categoria ausente no mês anterior (prev=0) não deve quebrar o .round().
+        df = pd.DataFrame([
+            {"arquivo": "f", "mes_referencia": "01/2026", "data": "", "descricao": "A",
+             "categoria": "Alimentação", "valor": 100.0, "parcela": ""},
+            {"arquivo": "f", "mes_referencia": "02/2026", "data": "", "descricao": "B",
+             "categoria": "Lazer", "valor": 50.0, "parcela": ""},
+        ])
+        mom = analytics.month_over_month(df)
+        lazer = mom[mom["categoria"] == "Lazer"].iloc[0]
+        assert pd.isna(lazer["variacao_%"])
+
     def test_forecast_no_data(self):
         fc = analytics.forecast_current_month(pd.DataFrame())
         assert fc["projecao"] == 0.0

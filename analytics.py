@@ -9,6 +9,7 @@ import calendar
 from datetime import date
 from typing import Dict
 
+import numpy as np
 import pandas as pd
 
 
@@ -73,12 +74,13 @@ def month_over_month(df: pd.DataFrame) -> pd.DataFrame:
 
     if len(meses) >= 2:
         anterior, atual = meses[-2], meses[-1]
-        prev = pivot[anterior].replace(0, pd.NA)
+        # np.nan (não pd.NA) mantém a coluna float para que .round() funcione.
+        prev = pivot[anterior].replace(0, np.nan)
         pivot["variacao_%"] = (
             (pivot[atual] - pivot[anterior]) / prev * 100
         ).round(1)
     else:
-        pivot["variacao_%"] = pd.NA
+        pivot["variacao_%"] = np.nan
 
     return pivot.reset_index()
 
